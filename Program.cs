@@ -8,17 +8,23 @@ using System.IO;
     отметить галочкой сборку System.Drawing    */
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Linq;
 
 public class PhotoshopMini
 {
     private Bitmap photo1 { get; set; }
     private Bitmap photo2 { get; set; }
     private Bitmap result { get; set; }
+    private Bitmap hist1 { get; set; }
+    private Bitmap hist2 { get; set; }
 
     public delegate Color Render_func(int r1, int g1, int b1, int r2, int g2, int b2);
 
     public Render_func choise_renderDelegate;
 
+    private float[] x;
+    private float[] y;
+    int count;
 
     // Конструктор
     public PhotoshopMini()
@@ -33,6 +39,7 @@ public class PhotoshopMini
         Console.WriteLine("Открываю изображение " + Directory.GetParent("..\\..\\") + "\\" + file2 + ".jpg\n");
         int choise = Print_actions();
         Choose_action(choise);
+        hist1 = DrawGist(photo1);
         Render();
     }
 
@@ -58,7 +65,8 @@ public class PhotoshopMini
             "3: Среднее-арифметическое\n" +
             "4: Минимум\n" +
             "5: Максимум\n" +
-            "6: Наложение маски\n");
+            "6: Наложение маски\n" +
+            "7: Градационное преобразование первой картинки\n");
         int choise = Convert.ToInt32(Console.ReadLine());
         return choise;
     }
@@ -88,6 +96,10 @@ public class PhotoshopMini
                 int mask_choise = Choose_mask_form();
                 Mask_drawer(mask_choise);
                 choise_renderDelegate = Prod_pix;
+                break;
+            case 7:
+                Interpol_points();
+                choise_renderDelegate = Grad_transform;
                 break;
         }
     }
@@ -129,8 +141,112 @@ public class PhotoshopMini
             }
 
         }
+
+        hist2 = DrawGist(result, 1);
+
         Save_result();
 
+    }
+
+
+    protected void Interpol_points()
+    {
+        Console.WriteLine("Введите кол-во точек для интерполирования: ");
+        count = Convert.ToInt32(Console.ReadLine()) + 2;
+        Console.WriteLine("Введите пары значений точек: ");
+        x = new float[count];
+        y = new float[count];
+        x[0] = 0;
+        y[0] = 0;
+        x[count - 1] = 255;
+        y[count - 1] = 255;
+        for (int i = 1; i < count - 1; i++)
+        {
+            string[] str = Console.ReadLine().Split(' ');
+            x[i] = (float)Convert.ToDouble(str[0]);
+            y[i] = (float)Convert.ToDouble(str[1]);
+        }
+        //Array.Sort(x, y);
+    }
+
+
+    public Bitmap DrawGist(Bitmap img, int inp = 0)
+    {
+        int[] hist = new int[256];
+        var histImage = new Bitmap(256, 256);
+        int height = img.Height, width = img.Width;
+        for (int i = 0; i < height; ++i)
+        {
+            for (int j = 0; j < width; ++j)
+            {
+                var pixel = img.GetPixel(j, i);
+                var c = (pixel.R + pixel.G + pixel.B) / 3;
+                hist[c]++;
+            }
+        }
+
+        var maxC = hist.Max();
+        var k = (float)height / maxC;
+
+        for (int i = 0; i < 256; i++)
+        {
+            int x1 = i, y1 = 255;
+            int x2 = i, y2 = (int)(255 - hist[i] * k);
+
+            using (var g = Graphics.FromImage(histImage))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.SmoothingMode = SmoothingMode.HighQuality;
+                var pen = Pens.White.Clone() as Pen;
+                pen.Width = 5;
+                g.DrawLine(pen, x1, y1, x2, y2);
+                var pen2 = Pens.ForestGreen.Clone() as Pen;
+                pen2.Width = 3;
+                if (inp == 1)
+                    for (int z = 0; z < count - 1; z++)
+                        g.DrawLine(pen2, x[z], (255 - y[z]), x[z + 1], (255 - y[z + 1]));
+            }
+        }
+
+        return histImage;
+    }
+
+    protected float Grad_transform_func_interpol(float X)
+    {
+        if (X <= x[0])
+            return y[0];
+        else if (X >= x[count - 1])
+            return y[count - 1];
+
+        // . в точках?
+        for (int i = 0; i < count - 1; ++i)
+            if (X == x[i])
+                return y[i];
+
+        // . между точками?
+        for (int i = 0; i < count - 1; ++i)
+            if (X >= x[i] && X <= x[i + 1])
+            {
+                float k = (y[i + 1] - y[i]) / (x[i + 1] - x[i]);
+
+                float b = y[i] - k * x[i];
+                return k * X + b;
+            }
+        return 0;
+    }
+
+
+    //Градационная трансформация
+    protected Color Grad_transform(int r1, int g1, int b1, int r2, int g2, int b2)
+    {
+
+        r1 = (int)Clamp(Grad_transform_func_interpol((float)r1 / 255) * 255, 0, 255);
+        g1 = (int)Clamp(Grad_transform_func_interpol((float)g1 / 255) * 255, 0, 255);
+        b1 = (int)Clamp(Grad_transform_func_interpol((float)b1 / 255) * 255, 0, 255);
+
+        Color pix = Color.FromArgb(r1, g1, b1);
+
+        return pix;
     }
 
 
@@ -232,9 +348,9 @@ public class PhotoshopMini
                     g.FillRectangle(Brushes.White, (w - x) / 2, (h - y) / 2, x, y);
                     break;
             }
-            
-        }  
-        
+
+        }
+
     }
 
 
@@ -248,6 +364,10 @@ public class PhotoshopMini
 
         result.Save(result_path + result_name + ".jpg");
 
+        if (hist1 != null)
+            hist1.Save(result_path + result_name + "_in_hist" + ".jpg");
+        if (hist2 != null)
+            hist2.Save(result_path + result_name + "_out_hist" + ".jpg");
         Console.WriteLine("Выходное изображение было сохренено по пути " + result_path + result_name + ".jpg");
         Console.ReadKey();
     }
