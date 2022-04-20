@@ -151,22 +151,25 @@ public class PhotoshopMini
 
     protected void Interpol_points()
     {
-        Console.WriteLine("Введите кол-во точек для интерполирования: ");
-        count = Convert.ToInt32(Console.ReadLine()) + 2;
+        Console.WriteLine("Введите кол-во точек для интерполирования: (минимум две для 0 и для 255)");
+        count = Convert.ToInt32(Console.ReadLine());
         Console.WriteLine("Введите пары значений точек: ");
         x = new float[count];
         y = new float[count];
+        Console.WriteLine("Введите значение y для x = 0: ");
         x[0] = 0;
-        y[0] = 0;
+        y[0] = (float)Convert.ToDouble(Console.ReadLine());
+
+        Console.WriteLine("Введите значение y для x = 255: ");
         x[count - 1] = 255;
-        y[count - 1] = 255;
+        y[count - 1] = (float)Convert.ToDouble(Console.ReadLine());
         for (int i = 1; i < count - 1; i++)
         {
             string[] str = Console.ReadLine().Split(' ');
             x[i] = (float)Convert.ToDouble(str[0]);
             y[i] = (float)Convert.ToDouble(str[1]);
         }
-        //Array.Sort(x, y);
+        // Array.Sort(x, y);
     }
 
 
@@ -197,7 +200,7 @@ public class PhotoshopMini
             {
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 g.SmoothingMode = SmoothingMode.HighQuality;
-                var pen = Pens.White.Clone() as Pen;
+                var pen = Pens.Black.Clone() as Pen;
                 pen.Width = 5;
                 g.DrawLine(pen, x1, y1, x2, y2);
                 var pen2 = Pens.ForestGreen.Clone() as Pen;
@@ -219,7 +222,7 @@ public class PhotoshopMini
             return y[count - 1];
 
         // . в точках?
-        for (int i = 0; i < count - 1; ++i)
+        for (int i = 0; i < count; ++i)
             if (X == x[i])
                 return y[i];
 
@@ -240,9 +243,9 @@ public class PhotoshopMini
     protected Color Grad_transform(int r1, int g1, int b1, int r2, int g2, int b2)
     {
 
-        r1 = (int)Clamp(Grad_transform_func_interpol((float)r1 / 255) * 255, 0, 255);
-        g1 = (int)Clamp(Grad_transform_func_interpol((float)g1 / 255) * 255, 0, 255);
-        b1 = (int)Clamp(Grad_transform_func_interpol((float)b1 / 255) * 255, 0, 255);
+        r1 = (int)Clamp(Grad_transform_func_interpol(r1), 0, 255);
+        g1 = (int)Clamp(Grad_transform_func_interpol(g1), 0, 255);
+        b1 = (int)Clamp(Grad_transform_func_interpol(b1), 0, 255);
 
         Color pix = Color.FromArgb(r1, g1, b1);
 
