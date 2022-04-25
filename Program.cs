@@ -17,13 +17,18 @@ public class PhotoshopMini
     private Bitmap result { get; set; }
     private Bitmap hist1 { get; set; }
     private Bitmap hist2 { get; set; }
+    private Bitmap binar_pic { get; set; }
 
     public delegate Color Render_func(int r1, int g1, int b1, int r2, int g2, int b2);
+    public delegate Color Render_func_solo_pic(int r, int g, int b);
 
+    public Render_func_solo_pic choise_solo_renderDelegate;
     public Render_func choise_renderDelegate;
 
     private float[] x;
     private float[] y;
+    private float[,] integral_matrix;
+    private float[,] integral_matrix_sqr;
     int count;
 
     // Конструктор
@@ -149,6 +154,31 @@ public class PhotoshopMini
     }
 
 
+    //Работа с результатом
+    protected void Render_solo()
+    {
+        var w = result.Width;
+        var h = result.Height;
+        binar_pic = new Bitmap(w, h);
+        for (int i = 0; i < h; ++i)
+        {
+            for (int j = 0; j < w; ++j)
+            {
+                var pix1 = result.GetPixel(j, i);
+
+                int r = pix1.R;
+                int g = pix1.G;
+                int b = pix1.B;
+
+                pix1 = choise_solo_renderDelegate(r, g, b);
+                binar_pic.SetPixel(j, i, pix1);
+
+            }
+        }
+    }
+
+
+
     protected void Interpol_points()
     {
         Console.WriteLine("Введите кол-во точек для интерполирования: (минимум две для 0 и для 255)");
@@ -173,6 +203,7 @@ public class PhotoshopMini
     }
 
 
+    // Создание картинки с гистограммой
     public Bitmap DrawGist(Bitmap img, int inp = 0)
     {
         int[] hist = new int[256];
@@ -214,6 +245,9 @@ public class PhotoshopMini
         return histImage;
     }
 
+
+    //Интерполирование функции по точкам,
+    //которая позже будет использоваться для градационного преобразования
     protected float Grad_transform_func_interpol(float X)
     {
         if (X <= x[0])
@@ -274,6 +308,19 @@ public class PhotoshopMini
         b1 = (int)Clamp(b1 * b2 / 255, 0, 255);
 
         Color pix = Color.FromArgb(r1, g1, b1);
+
+        return pix;
+    }
+
+
+    //Приведение картинки к градациям серого
+    protected Color Grad_grey(int r, int g, int b)
+    {
+        r = (int)(r * 0.2125);
+        g = (int)(g * 0.7154);
+        b = (int)(b * 0.0721);
+
+        Color pix = Color.FromArgb(r, g, b);
 
         return pix;
     }
@@ -357,9 +404,475 @@ public class PhotoshopMini
     }
 
 
+    //Требование бинаризации
+    protected bool Binar_is_required()
+    {
+        Console.WriteLine("Требуется ли бинаризировать результат? \n" +
+            "1: Да \n" +
+            "2: Нет \n");
+        int ans = Convert.ToInt32(Console.ReadLine());
+        bool choise = ans == 1;
+        return choise;
+    }
+
+
+    //Выбор Алгоритма бинаризации
+    public int Print_binar_variations()
+    {
+        Console.WriteLine("Выберите алгоритм бинаризации:\n" +
+            "1: Метод Gavrega\n" +
+            "2: Метод Отсу\n" +
+            "3: Метод Ниблека\n" +
+            "4: Метод Сауволы\n" +
+            "5: Метод Вульфа\n" +
+            "6: Метод Бредли-Рота\n");
+        int choise = Convert.ToInt32(Console.ReadLine());
+        return choise;
+    }
+
+
+    //Вызовы алгоритмов бинаризации
+    protected void Choose_bin_alg(int choise)
+    {
+        choise_solo_renderDelegate = Grad_grey;
+        Render_solo();
+
+        switch (choise)
+        {
+            case 1:
+                Gavr_method(binar_pic);
+                break;
+            case 2:
+                Otsu_method(binar_pic);
+                break;
+            case 3:
+                Console.WriteLine("Введите размер окна:");
+                int size = Convert.ToInt32(Console.ReadLine());
+                Console.WriteLine("Введите чувствительность:");
+                float sens = (float)Convert.ToDouble(Console.ReadLine());
+                Niblek_method(binar_pic, size, sens);
+                break;
+            case 4:
+                Console.WriteLine("Введите размер окна:");
+                size = (int)Convert.ToInt32(Console.ReadLine());
+                Console.WriteLine("Введите R:");
+                int R = (int)Convert.ToDouble(Console.ReadLine());
+                Console.WriteLine("Введите чувствительность:");
+                sens = (float)Convert.ToDouble(Console.ReadLine());
+                Sauvol_method(binar_pic, size, R, sens);
+                break;
+            case 5:
+                Console.WriteLine("Введите размер окна:");
+                size = (int)Convert.ToInt32(Console.ReadLine());
+                Console.WriteLine("Введите коэффициент alpha:");
+                int alpha = (int)Convert.ToDouble(Console.ReadLine());
+                Christian_method(binar_pic, size, alpha);
+                break;
+            case 6:
+                Console.WriteLine("Введите размер окна:");
+                size = (int)Convert.ToInt32(Console.ReadLine());
+                Console.WriteLine("Введите чувствительность:");
+                sens = (int)Convert.ToDouble(Console.ReadLine());
+                Bredley_method(binar_pic, size, sens);
+                break;
+        }
+    }
+
+
+    //Реализации алгоритмов бинаризации
+
+    //Создание интегральной матрицы
+    protected void get_integral_matrix(Bitmap pic, bool sqr)
+    {
+        var w = pic.Width;
+        var h = pic.Height;
+        if (sqr)
+            integral_matrix_sqr = new float[h + 1, w + 1];
+        else
+            integral_matrix = new float[h + 1, w + 1];
+        float bright;
+        for (int i = 0; i < h; ++i)
+        {
+            for (int j = 0; j < w; ++j)
+            {
+                if (i == 0 || j == 0)
+                {
+                    if (sqr)
+                        integral_matrix_sqr[i, j] = 0;
+                    else
+                        integral_matrix[i, j] = 0;
+                }
+
+                else
+                {
+                    var pix1 = pic.GetPixel(j, i);
+                    bright = (pix1.R + pix1.G + pix1.B) / 3;
+                    if (sqr)
+                    {
+                        bright *= bright;
+                        integral_matrix_sqr[i, j] = bright + integral_matrix_sqr[i - 1, j] + integral_matrix_sqr[i, j - 1] - integral_matrix_sqr[i - 1, j - 1];
+                    }
+                    else
+                        integral_matrix[i, j] = bright + integral_matrix[i - 1, j] + integral_matrix[i, j - 1] - integral_matrix[i - 1, j - 1];
+                }
+            }
+        }
+    }
+
+    //Алгоритм Гаврега
+    protected void Gavr_method(Bitmap pic)
+    {
+        var w = pic.Width;
+        var h = pic.Height;
+        float t = 0;
+        float bright;
+        int color;
+        for (int i = 0; i < h; ++i)
+        {
+            for (int j = 0; j < w; ++j)
+            {
+                var pix1 = pic.GetPixel(j, i);
+                t += pix1.GetBrightness();
+            }
+        }
+        t = t / (w * h);
+        for (int i = 0; i < h; ++i)
+        {
+            for (int j = 0; j < w; ++j)
+            {
+                var pix1 = pic.GetPixel(j, i);
+                bright = pix1.GetBrightness();
+                color = bright <= t ? 0 : 255;
+                Color pix = Color.FromArgb(color, color, color);
+                binar_pic.SetPixel(j, i, pix);
+            }
+        }
+    }
+
+
+    // Алгоритм Отсу
+    protected void Otsu_method(Bitmap pic)
+    {
+        float[] hist = new float[256];
+        int height = pic.Height, width = pic.Width;
+        int max_bright = 0;
+        for (int i = 0; i < height; ++i)
+        {
+            for (int j = 0; j < width; ++j)
+            {
+                var pixel = pic.GetPixel(j, i);
+                var c = (int)((pixel.R +pixel.G + pixel.B) / 3);
+                if (c > max_bright)
+                    max_bright = c;
+                hist[c]++;
+            }
+        }
+        int total_pix = height * width;
+        float m_t = 0;
+        for (int i = 0; i <= max_bright; ++i)
+        {
+            hist[i] = hist[i] / total_pix;
+            m_t += hist[i] * i;
+        }
+        float m_2, m_1, m_3 = 0;
+        float g_2, g_1 = 0;
+        float sigma_2, sigma_max = 0;
+        float t = 0;
+        for (int i = 1; i <= max_bright + 1; ++i)
+        {
+            g_1 += hist[i - 1];
+            m_3 += hist[i - 1] * i;
+            g_2 = 1 - g_1;
+            m_1 = m_3 / g_1;
+            m_2 = (m_t - m_1 * g_1) / g_2;
+            sigma_2 = g_1 * g_2 * (float)Math.Pow((m_1 - m_2), 2);
+            if (sigma_2 > sigma_max)
+            {
+                sigma_max = sigma_2;
+                t = (float)i;
+                Console.WriteLine(t);
+            }
+        }
+        float bright;
+        int color;
+        for (int i = 0; i < height; ++i)
+        {
+            for (int j = 0; j < width; ++j)
+            {
+                var pix1 = pic.GetPixel(j, i);
+                bright = (pix1.R + pix1.G + pix1.B);
+                Console.WriteLine(bright);
+                color = bright <= t ? 0 : 255;
+                Color pix = Color.FromArgb(color, color, color);
+                binar_pic.SetPixel(j, i, pix);
+            }
+        }
+    }
+
+
+    //Алгоритм Критерий Ниблека
+    protected void Niblek_method(Bitmap pic, int size, float sens)
+    {
+        Bitmap pic_temp = pic;
+        sens = sens * (-1);
+        float bright;
+        int color;
+        get_integral_matrix(pic_temp, false);
+        get_integral_matrix(pic_temp, true);
+        int h = pic.Height, w = pic.Width;
+        int step = (size - 1) / 2;
+        float m_o_2, m_2_o, m_o,dispersion, std_divr, t;
+        int x1, x2, y1, y2;
+        for (int i = 0; i < h; ++i)
+        {
+            for (int j = 0; j < w; ++j)
+            {
+                if (i - step < 0)
+                    x1 = 0;
+                else
+                    x1 = i - step;
+                
+                if (i + step >= h)
+                    x2 = h - 1;
+                else
+                    x2 = i + step;
+                
+                if (j - step < 0)
+                    y1 = 0;
+                else
+                    y1 = j - step;
+
+                if (j + step >= w)
+                    y2 = w - 1;
+                else
+                    y2 = j + step;
+
+                int win_size = (x2 - x1 + 1) * (y2 - y1 + 1);
+                var pix1 = pic.GetPixel(j, i);
+                m_o = ((integral_matrix[x2 + 1, y2 + 1] + integral_matrix[x1, y1] - integral_matrix[x1, y2 + 1] - integral_matrix[x2 + 1, y1]) / win_size);
+                m_o_2 = (float)Math.Pow(m_o, 2);
+                m_2_o = (integral_matrix_sqr[x2 + 1, y2 + 1] + integral_matrix_sqr[x1, y1] - integral_matrix_sqr[x1, y2 + 1] - integral_matrix_sqr[x2 + 1, y1]) / win_size;
+                dispersion = m_2_o - m_o_2;
+                std_divr = (float)Math.Pow(dispersion, 0.5);
+                t = m_o + sens * std_divr;
+                bright = (pix1.R + pix1.G + pix1.B) / 3;
+                color = bright <= t ? 0 : 255;
+                Color pix = Color.FromArgb(color, color, color);
+                binar_pic.SetPixel(j, i, pix);
+            }
+        }
+    }
+
+
+    //Алгоритм Критерий Сауволы
+    protected void Sauvol_method(Bitmap pic, int size, int R, float sens)
+    {
+        Bitmap pic_temp = pic;
+        sens = sens * (-1);
+        float bright;
+        int color;
+        get_integral_matrix(pic_temp, false);
+        get_integral_matrix(pic_temp, true);
+        int h = pic.Height, w = pic.Width;
+        int step = (size - 1) / 2;
+        float m_o_2, m_2_o, m_o, dispersion, std_divr, t;
+        int x1, x2, y1, y2;
+        for (int i = 0; i < h; ++i)
+        {
+            for (int j = 0; j < w; ++j)
+            {
+                if (i - step < 0)
+                    x1 = 0;
+                else
+                    x1 = i - step;
+
+                if (i + step >= h)
+                    x2 = h - 1;
+                else
+                    x2 = i + step;
+
+                if (j - step < 0)
+                    y1 = 0;
+                else
+                    y1 = j - step;
+
+                if (j + step >= w)
+                    y2 = w - 1;
+                else
+                    y2 = j + step;
+
+                int win_size = (x2 - x1 + 1) * (y2 - y1 + 1);
+                var pix1 = pic.GetPixel(j, i);
+                m_o = ((integral_matrix[x2 + 1, y2 + 1] + integral_matrix[x1, y1] - integral_matrix[x1, y2 + 1] - integral_matrix[x2 + 1, y1]) / win_size);
+                m_o_2 = (float)Math.Pow(m_o, 2);
+                m_2_o = (integral_matrix_sqr[x2 + 1, y2 + 1] + integral_matrix_sqr[x1, y1] - integral_matrix_sqr[x1, y2 + 1] - integral_matrix_sqr[x2 + 1, y1]) / win_size;
+                dispersion = m_2_o - m_o_2;
+                std_divr = (float)Math.Pow(dispersion, 0.5);
+                t = m_o * (1 + sens * (std_divr / R - 1));
+                bright = (pix1.R + pix1.G + pix1.B) / 3;
+                color = bright <= t ? 0 : 255;
+                Color pix = Color.FromArgb(color, color, color);
+                binar_pic.SetPixel(j, i, pix);
+            }
+        }
+    }
+
+
+    //Алгоритм Кристианна Вульфа
+    protected void Christian_method(Bitmap pic, int size, float alpha)
+    {
+        Bitmap pic_temp = pic;
+        float bright;
+        int color;
+        get_integral_matrix(pic_temp, false);
+        get_integral_matrix(pic_temp, true);
+        int h = pic.Height, w = pic.Width;
+        int step = (size - 1) / 2;
+        float m_o_2, m_2_o, m_o, dispersion, std_divr, t;
+        int x1, x2, y1, y2;
+        float min_pix = 257, max_std_divr = 0;
+        for (int i = 0; i < h; ++i)
+        {
+            for (int j = 0; j < w; ++j)
+            {
+                if (i - step < 0)
+                    x1 = 0;
+                else
+                    x1 = i - step;
+
+                if (i + step >= h)
+                    x2 = h - 1;
+                else
+                    x2 = i + step;
+
+                if (j - step < 0)
+                    y1 = 0;
+                else
+                    y1 = j - step;
+
+                if (j + step >= w)
+                    y2 = w - 1;
+                else
+                    y2 = j + step;
+
+                int win_size = (x2 - x1 + 1) * (y2 - y1 + 1);
+                var pix1 = pic.GetPixel(j, i);
+                m_o = ((integral_matrix[x2 + 1, y2 + 1] + integral_matrix[x1, y1] - integral_matrix[x1, y2 + 1] - integral_matrix[x2 + 1, y1]) / win_size);
+                m_o_2 = (float)Math.Pow(m_o, 2);
+                m_2_o = (integral_matrix_sqr[x2 + 1, y2 + 1] + integral_matrix_sqr[x1, y1] - integral_matrix_sqr[x1, y2 + 1] - integral_matrix_sqr[x2 + 1, y1]) / win_size;
+                dispersion = m_2_o - m_o_2;
+                std_divr = (float)Math.Pow(dispersion, 0.5);
+                bright = (pix1.R + pix1.G + pix1.B) / 3;
+                if (bright < min_pix)
+                    min_pix = bright;
+                if (std_divr > max_std_divr)
+                    max_std_divr = std_divr;
+
+            }
+        }
+        for (int i = 0; i < h; ++i)
+        {
+            for (int j = 0; j < w; ++j)
+            {
+                if (i - step < 0)
+                    x1 = 0;
+                else
+                    x1 = i - step;
+
+                if (i + step >= h)
+                    x2 = h - 1;
+                else
+                    x2 = i + step;
+
+                if (j - step < 0)
+                    y1 = 0;
+                else
+                    y1 = j - step;
+
+                if (j + step >= w)
+                    y2 = w - 1;
+                else
+                    y2 = j + step;
+
+                int win_size = (x2 - x1 + 1) * (y2 - y1 + 1);
+                var pix1 = pic.GetPixel(j, i);
+                m_o = ((integral_matrix[x2 + 1, y2 + 1] + integral_matrix[x1, y1] - integral_matrix[x1, y2 + 1] - integral_matrix[x2 + 1, y1]) / win_size);
+                m_o_2 = (float)Math.Pow(m_o, 2);
+                m_2_o = (integral_matrix_sqr[x2 + 1, y2 + 1] + integral_matrix_sqr[x1, y1] - integral_matrix_sqr[x1, y2 + 1] - integral_matrix_sqr[x2 + 1, y1]) / win_size;
+                dispersion = m_2_o - m_o_2;
+                std_divr = (float)Math.Pow(dispersion, 0.5);
+                t = (1 - alpha) * m_o + alpha * min_pix + alpha * (std_divr / max_std_divr) * (m_o - min_pix);
+                bright = (pix1.R + pix1.G + pix1.B) / 3;
+                color = bright <= t ? 0 : 255;
+                Color pix = Color.FromArgb(color, color, color);
+                binar_pic.SetPixel(j, i, pix);
+            }
+        }
+    }
+
+
+    //Алгоритм Бредли-Рота
+    protected void Bredley_method(Bitmap pic, int size, float sense)
+    {
+        Bitmap pic_temp = pic;
+        float bright;
+        int color;
+        get_integral_matrix(pic_temp, false);
+        get_integral_matrix(pic_temp, true);
+        int h = pic.Height, w = pic.Width;
+        int step = (size - 1) / 2;
+        float m_o, sum, t;
+        int x1, x2, y1, y2;
+        for (int i = 0; i < h; ++i)
+        {
+            for (int j = 0; j < w; ++j)
+            {
+                if (i - step < 0)
+                    x1 = 0;
+                else
+                    x1 = i - step;
+
+                if (i + step >= h)
+                    x2 = h - 1;
+                else
+                    x2 = i + step;
+
+                if (j - step < 0)
+                    y1 = 0;
+                else
+                    y1 = j - step;
+
+                if (j + step >= w)
+                    y2 = w - 1;
+                else
+                    y2 = j + step;
+
+                int win_size = (x2 - x1 + 1) * (y2 - y1 + 1);
+                var pix1 = pic.GetPixel(j, i);
+                bright = (pix1.R + pix1.G + pix1.B) / 3;
+                m_o = integral_matrix[x2 + 1, y2 + 1] + integral_matrix[x1, y1] - integral_matrix[x1, y2 + 1] - integral_matrix[x2 + 1, y1];
+                t = m_o * (1 - sense);
+                color = bright * win_size < t ? 0 : 255;
+                Color pix = Color.FromArgb(color, color, color);
+                binar_pic.SetPixel(j, i, pix);
+
+            }
+        }
+    }
+
+
     // Сохранение результата
     protected void Save_result()
     {
+        int binar_choise;
+        //Требуется ли бинаризация
+        if (Binar_is_required())
+        {
+            binar_choise = Print_binar_variations();
+            Choose_bin_alg(binar_choise);
+        }
+
+
         Console.WriteLine("Введите название результата без разрешения:");
         string result_name = Console.ReadLine();
         Console.WriteLine("Введите путь сохранения");
@@ -371,6 +884,8 @@ public class PhotoshopMini
             hist1.Save(result_path + result_name + "_in_hist" + ".jpg");
         if (hist2 != null)
             hist2.Save(result_path + result_name + "_out_hist" + ".jpg");
+        if (binar_pic != null)
+            binar_pic.Save(result_path + result_name + "_binarized" + ".jpg");
         Console.WriteLine("Выходное изображение было сохренено по пути " + result_path + result_name + ".jpg");
         Console.ReadKey();
     }
